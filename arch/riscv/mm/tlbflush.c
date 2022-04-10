@@ -5,6 +5,12 @@
 #include <linux/sched.h>
 #include <asm/sbi.h>
 #include <asm/mmu_context.h>
+#include <asm/hwcap.h>
+#include <asm/insn-def.h>
+
+#define has_svinval()	riscv_has_extension_unlikely(RISCV_ISA_EXT_SVINVAL)
+
+static unsigned long tlb_flush_all_threshold __read_mostly = PTRS_PER_PTE;
 
 static inline void local_flush_tlb_all_asid(unsigned long asid)
 {
@@ -26,19 +32,63 @@ static inline void local_flush_tlb_page_asid(unsigned long addr,
 static inline void local_flush_tlb_range(unsigned long start,
 		unsigned long size, unsigned long stride)
 {
-	if (size <= stride)
-		local_flush_tlb_page(start);
-	else
+	if ((size / stride) <= tlb_flush_all_threshold) {
+		if (has_svinval()) {
+			asm volatile (SFENCE_W_INVAL() ::: "memory");
+			while (size) {
+				asm volatile (SINVAL_VMA(%0, zero)
+				: : "r" (start) : "memory");
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+			asm volatile (SFENCE_INVAL_IR() ::: "memory");
+		} else {
+			while (size) {
+				local_flush_tlb_page(start);
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+		}
+	} else {
 		local_flush_tlb_all();
+	}
 }
 
 static inline void local_flush_tlb_range_asid(unsigned long start,
 		unsigned long size, unsigned long stride, unsigned long asid)
 {
-	if (size <= stride)
-		local_flush_tlb_page_asid(start, asid);
-	else
+	if ((size / stride) <= tlb_flush_all_threshold) {
+		if (has_svinval()) {
+			asm volatile (SFENCE_W_INVAL() ::: "memory");
+			while (size) {
+				asm volatile (SINVAL_VMA(%0, %1)
+				: : "r" (start) , "r" (asid) : "memory");
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+			asm volatile (SFENCE_INVAL_IR() ::: "memory");
+		} else {
+			while (size) {
+				local_flush_tlb_page_asid(start, asid);
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+		}
+	} else {
 		local_flush_tlb_all_asid(asid);
+	}
 }
 
 static void __ipi_flush_tlb_all(void *info)
