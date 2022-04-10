@@ -295,6 +295,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	riscv_fill_hwcap();
+	riscv_tlbflush_init();
 }
 
 static int __init topology_init(void)

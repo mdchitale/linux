@@ -22,6 +22,18 @@ static inline void local_flush_tlb_page(unsigned long addr)
 {
 	ALT_FLUSH_TLB_PAGE(__asm__ __volatile__ ("sfence.vma %0" : : "r" (addr) : "memory"));
 }
+
+void riscv_tlbflush_init(void);
+void __riscv_sfence_w_inval(void);
+void __riscv_sfence_inval_ir(void);
+void __riscv_sinval_vma(unsigned long addr);
+void __riscv_sinval_vma_asid(unsigned long addr, unsigned long asid);
+
+/* Check if we can use sinval for tlb flush */
+DECLARE_STATIC_KEY_FALSE(riscv_flush_tlb_svinval);
+#define riscv_use_flush_tlb_svinval() \
+	static_branch_unlikely(&riscv_flush_tlb_svinval)
+
 #else /* CONFIG_MMU */
 #define local_flush_tlb_all()			do { } while (0)
 #define local_flush_tlb_page(addr)		do { } while (0)

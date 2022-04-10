@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#define pr_fmt(fmt) "riscv: " fmt
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/sched.h>
 #include <asm/sbi.h>
 #include <asm/mmu_context.h>
+
+static unsigned long tlb_flush_all_threshold __read_mostly = PTRS_PER_PTE;
 
 static inline void local_flush_tlb_all_asid(unsigned long asid)
 {
@@ -23,22 +26,110 @@ static inline void local_flush_tlb_page_asid(unsigned long addr,
 			: "memory");
 }
 
+static inline void riscv_sfence_inval_ir(void)
+{
+	/*
+	 * SFENCE.INVAL.IR
+	 * 0001100 00001 00000 000 00000 1110011
+	 */
+	asm volatile (".word 0x18100073" ::: "memory");
+}
+
+static inline void riscv_sfence_w_inval(void)
+{
+	/*
+	 * SFENCE.W.INVAL
+	 * 0001100 00000 00000 000 00000 1110011
+	 */
+	asm volatile (".word 0x18000073" ::: "memory");
+}
+
+static inline void riscv_sinval_vma_asid(unsigned long vma, unsigned long asid)
+{
+	/*
+	 * rs1 = a0 (VMA)
+	 * rs2 = a1 (asid)
+	 * SINVAL.VMA a0, a1
+	 * 0001011 01011 01010 000 00000 1110011
+	 */
+	asm volatile ("srli a0, %0, 2\n"
+			"add a1, %1, zero\n"
+			".word 0x16B50073\n"
+			:: "r" (vma), "r" (asid)
+			: "a0", "a1", "memory");
+}
+
+static inline void riscv_sinval_vma(unsigned long vma)
+{
+	/*
+	 * rs1 = a0 (VMA)
+	 * rs2 = 0
+	 * SINVAL.VMA a0
+	 * 0001011 00000 01010 000 00000 1110011
+	 */
+	asm volatile ("srli a0, %0, 2\n"
+			".word 0x16050073\n"
+			:: "r" (vma) : "a0", "memory");
+}
+
 static inline void local_flush_tlb_range(unsigned long start,
 		unsigned long size, unsigned long stride)
 {
-	if (size <= stride)
-		local_flush_tlb_page(start);
-	else
+	if ((size / stride) <= tlb_flush_all_threshold) {
+		if (riscv_use_flush_tlb_svinval()) {
+			riscv_sfence_w_inval();
+			while (size) {
+				riscv_sinval_vma(start);
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+			riscv_sfence_inval_ir();
+		} else {
+			while (size) {
+				local_flush_tlb_page(start);
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+		}
+	} else {
 		local_flush_tlb_all();
+	}
 }
 
 static inline void local_flush_tlb_range_asid(unsigned long start,
 		unsigned long size, unsigned long stride, unsigned long asid)
 {
-	if (size <= stride)
-		local_flush_tlb_page_asid(start, asid);
-	else
+	if ((size / stride) <= tlb_flush_all_threshold) {
+		if (riscv_use_flush_tlb_svinval()) {
+			riscv_sfence_w_inval();
+			while (size) {
+				riscv_sinval_vma_asid(start, asid);
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+			riscv_sfence_inval_ir();
+		} else {
+			while (size) {
+				local_flush_tlb_page_asid(start, asid);
+				start += stride;
+				if (size > stride)
+					size -= stride;
+				else
+					size = 0;
+			}
+		}
+	} else {
 		local_flush_tlb_all_asid(asid);
+	}
 }
 
 static void __ipi_flush_tlb_all(void *info)
@@ -149,3 +240,16 @@ void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
 	__flush_tlb_range(vma->vm_mm, start, end - start, PMD_SIZE);
 }
 #endif
+
+DEFINE_STATIC_KEY_FALSE(riscv_flush_tlb_svinval);
+EXPORT_SYMBOL_GPL(riscv_flush_tlb_svinval);
+
+void riscv_tlbflush_init(void)
+{
+	if (riscv_isa_extension_available(NULL, SVINVAL)) {
+		pr_info("Svinval extension supported\n");
+		static_branch_enable(&riscv_flush_tlb_svinval);
+	} else {
+		static_branch_disable(&riscv_flush_tlb_svinval);
+	}
+}
