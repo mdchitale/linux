@@ -83,4 +83,14 @@
 #define __RS1(v)	__REG(v)
 #define __RS2(v)	__REG(v)
 
+#define OPCODE_SYSTEM	OPCODE(115)
+
+#define HFENCE_VVMA(vaddr, asid)				\
+	INSN_R(OPCODE_SYSTEM, FUNC3(0), FUNC7(17),		\
+	       __RD(0), RS1(vaddr), RS2(asid))
+
+#define HFENCE_GVMA(gaddr, vmid)				\
+	INSN_R(OPCODE_SYSTEM, FUNC3(0), FUNC7(49),		\
+	       __RD(0), RS1(gaddr), RS2(vmid))
+
 #endif /* __ASM_INSN_DEF_H */
