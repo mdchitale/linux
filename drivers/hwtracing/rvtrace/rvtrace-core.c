@@ -211,6 +211,13 @@ int rvtrace_disable_component(struct rvtrace_component *comp)
 }
 EXPORT_SYMBOL_GPL(rvtrace_disable_component);
 
+static int rvtrace_comp_poll_empty(struct rvtrace_component *comp)
+{
+	return rvtrace_poll_bit(comp->pdata, RVTRACE_COMPONENT_CTRL_OFFSET,
+				RVTRACE_COMPONENT_CTRL_EMPTY_SHIFT, 1,
+				comp->pdata->control_poll_timeout_usecs);
+}
+
 static int __rvtrace_walk_output_components(struct rvtrace_component *comp,
 					    bool *stop, void *priv,
 					    int (*fn)(struct rvtrace_component *comp, bool *stop,
@@ -630,6 +637,139 @@ static void rvtrace_release_path_nodes(struct rvtrace_path *path)
 		kfree(node);
 	}
 }
+
+static int rvtrace_disable_comp_by_type(struct rvtrace_path *path, enum rvtrace_component_type type)
+{
+	const struct rvtrace_path_node *node;
+	struct rvtrace_component *comp;
+	int ret;
+
+	list_for_each_entry(node, &path->comp_list, head) {
+		comp = node->comp;
+		if (comp->id.type != type)
+			continue;
+
+		ret = rvtrace_disable_component(node->comp);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int rvtrace_enable_comp_by_type(struct rvtrace_path *path, enum rvtrace_component_type type)
+{
+	const struct rvtrace_path_node *node;
+	struct rvtrace_component *comp;
+	int ret;
+
+	list_for_each_entry(node, &path->comp_list, head) {
+		comp = node->comp;
+		if (comp->id.type != type)
+			continue;
+
+		ret = rvtrace_enable_component(node->comp);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int rvtrace_stop_comp_by_type(struct rvtrace_path *path, enum rvtrace_component_type type)
+{
+	const struct rvtrace_path_node *node;
+	const struct rvtrace_driver *rtdrv;
+	struct rvtrace_component *comp;
+	int ret;
+
+	list_for_each_entry(node, &path->comp_list, head) {
+		comp = node->comp;
+		if (comp->id.type != type)
+			continue;
+
+		rtdrv = to_rvtrace_driver(comp->dev.driver);
+		if (rtdrv->stop) {
+			ret = rtdrv->stop(comp);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+static int rvtrace_start_comp_by_type(struct rvtrace_path *path, enum rvtrace_component_type type)
+{
+	const struct rvtrace_path_node *node;
+	const struct rvtrace_driver *rtdrv;
+	struct rvtrace_component *comp;
+	int ret;
+
+	list_for_each_entry(node, &path->comp_list, head) {
+		comp = node->comp;
+		if (comp->id.type != type)
+			continue;
+
+		rtdrv = to_rvtrace_driver(comp->dev.driver);
+		if (rtdrv->start) {
+			ret = rtdrv->start(comp);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+int rvtrace_path_start(struct rvtrace_path *path)
+{
+	int ret;
+
+	ret = rvtrace_enable_comp_by_type(path, RVTRACE_COMPONENT_TYPE_RAMSINK);
+	if (ret)
+		return ret;
+
+	ret = rvtrace_enable_comp_by_type(path, RVTRACE_COMPONENT_TYPE_ENCODER);
+	if (ret)
+		return ret;
+
+	ret = rvtrace_start_comp_by_type(path, RVTRACE_COMPONENT_TYPE_ENCODER);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rvtrace_path_start);
+
+int rvtrace_path_stop(struct rvtrace_path *path)
+{
+	struct rvtrace_path_node *node;
+	struct rvtrace_component *comp;
+	int ret;
+
+	ret = rvtrace_stop_comp_by_type(path, RVTRACE_COMPONENT_TYPE_ENCODER);
+	if (ret)
+		return ret;
+
+	ret = rvtrace_disable_comp_by_type(path, RVTRACE_COMPONENT_TYPE_ENCODER);
+	if (ret)
+		return ret;
+
+	ret = rvtrace_disable_comp_by_type(path, RVTRACE_COMPONENT_TYPE_RAMSINK);
+	if (ret)
+		return ret;
+
+	/* Wait for Empty bit of each component to be cleared. */
+	list_for_each_entry(node, &path->comp_list, head) {
+		comp = node->comp;
+		ret = rvtrace_comp_poll_empty(node->comp);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rvtrace_path_stop);
 
 struct rvtrace_path *rvtrace_create_path(struct rvtrace_component *source,
 					 struct rvtrace_component *sink,
