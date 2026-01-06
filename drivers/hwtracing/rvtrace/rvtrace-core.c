@@ -171,17 +171,16 @@ EXPORT_SYMBOL_GPL(rvtrace_find_by_fwnode);
 int rvtrace_poll_bit(struct rvtrace_platform_data *pdata, int offset,
 		     int bit, int bitval, int timeout)
 {
-	int i = 10;
 	u32 val;
 
-	while (i--) {
+	while (timeout--) {
 		val = rvtrace_read32(pdata, offset);
 		if (((val >> bit) & 0x1) == bitval)
 			break;
-		udelay(timeout);
+		udelay(1);
 	}
 
-	return (i < 0) ? -ETIMEDOUT : 0;
+	return (timeout < 0) ? -ETIMEDOUT : 0;
 }
 EXPORT_SYMBOL_GPL(rvtrace_poll_bit);
 
@@ -638,7 +637,7 @@ int rvtrace_path_start(struct rvtrace_path *path)
 	struct rvtrace_path_node *node;
 	int ret;
 
-	list_for_each_entry(node, &path->comp_list, head) {
+	list_for_each_entry_reverse(node, &path->comp_list, head) {
 		comp = node->comp;
 		rtdrv = to_rvtrace_driver(comp->dev.driver);
 		if (!rtdrv->start)

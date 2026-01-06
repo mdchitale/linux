@@ -336,7 +336,7 @@ static inline void rvtrace_unregister_driver(struct rvtrace_driver *rtdrv)
 		driver_unregister(&rtdrv->driver);
 }
 
-static inline int rvtrace_comp_is_empty(struct rvtrace_component *comp)
+static inline int rvtrace_comp_poll_empty(struct rvtrace_component *comp)
 {
 	return rvtrace_poll_bit(comp->pdata, RVTRACE_COMPONENT_CTRL_OFFSET,
 				RVTRACE_COMPONENT_CTRL_EMPTY_SHIFT, 1,

@@ -56,6 +56,8 @@ static int rvtrace_of_parse_outconns(struct rvtrace_platform_data *pdata)
 		ret = of_graph_parse_endpoint(rep_node, &rep);
 		if (ret) {
 			of_node_put(ep_node);
+			of_node_put(rep_node);
+			of_node_put(rdev_node);
 			break;
 		}
 
