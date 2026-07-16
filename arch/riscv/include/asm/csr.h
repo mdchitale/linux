@@ -316,6 +316,19 @@
 
 #define CSR_SCOUNTOVF		0xda0
 
+/*
+ * Sspesa (Precise Event Sample Attribution) CSRs.
+ *
+ * NOTE: The RISC-V Performance Event Sampling specification (v0.6.0) does not
+ * yet assign final CSR numbers for shpmspc/shpmsdata. Update these when the
+ * addresses are ratified.
+ */
+#define CSR_SHPMSPC		0x5d0
+#define CSR_SHPMSDATA		0x5d1
+
+/* shpmsdata fields */
+#define SHPMSDATA_CNTRID	GENMASK(4, 0)
+
 #define CSR_SSTATUS		0x100
 #define CSR_SIE			0x104
 #define CSR_STVEC		0x105
