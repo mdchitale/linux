@@ -61,6 +61,9 @@ asm volatile(ALTERNATIVE(						\
 
 PMU_FORMAT_ATTR(event, "config:0-55");
 PMU_FORMAT_ATTR(firmware, "config:62-63");
+PMU_FORMAT_ATTR(pesa, "config:56");
+
+#define RISCV_PMU_PESA_EVENT	BIT_ULL(56)
 
 static bool sbi_v2_available;
 static bool sbi_v3_available;
@@ -74,6 +77,7 @@ static DEFINE_STATIC_KEY_FALSE(sbi_pmu_snapshot_available);
 static struct attribute *riscv_arch_formats_attr[] = {
 	&format_attr_event.attr,
 	&format_attr_firmware.attr,
+	&format_attr_pesa.attr,
 	NULL,
 };
 
@@ -671,6 +675,24 @@ static bool pmu_sbi_is_fw_event(struct perf_event *event)
 		return false;
 }
 
+/* TODO: comment */
+static bool pmu_sbi_is_pesa_event(struct perf_event *event)
+{
+	u64 config = event->attr.config;
+
+	return sspesa_available && event->attr.type == PERF_TYPE_RAW &&
+	       !(config >> 62) && (config & RISCV_PMU_PESA_EVENT);
+}
+
+/* TODO: comment */
+static int pmu_sbi_precise_max(struct perf_event *event)
+{
+	if (!pmu_sbi_is_pesa_event(event))
+		return 0;
+
+	return ssplcofi_available ? 3 : 2;
+}
+
 static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
 {
 	u32 type = event->attr.type;
@@ -681,6 +703,12 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
 	 * validity before allowing userspace to configure any events.
 	 */
 	flush_work(&check_std_events_work);
+
+	if (event->attr.precise_ip > pmu_sbi_precise_max(event))
+		return -EOPNOTSUPP;
+
+	if (type == PERF_TYPE_RAW && !(config >> 62))
+		config &= ~RISCV_PMU_PESA_EVENT;
 
 	return riscv_pmu_get_event_info(type, config, econfig);
 }
@@ -1218,8 +1246,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 				data.sample_flags |= PERF_SAMPLE_IP;
 			} else if (pmu_sbi_sspesa_regs(&sregs, regs, sample_pc,
 						       sample_data)) {
-				if (ssplcofi_available &&
-				    event->attr.precise_ip == 3)
+				if (pmu_sbi_is_pesa_event(event))
 					sregs.status |= PERF_SR_EXACT;
 				sample_regs = &sregs;
 			}
