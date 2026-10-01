@@ -401,6 +401,7 @@ class JsonEvent:
         ('EnAllSlices', 'enallslices='),
         ('SliceId', 'sliceid='),
         ('ThreadMask', 'threadmask='),
+        ('PesaSupported', 'pesa='),
     ]
     for key, value in event_fields:
       if key in jd and not is_zero(jd[key]):
