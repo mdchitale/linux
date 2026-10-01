@@ -1,0 +1,14 @@
+[
+  {
+    "EventName": "INSTRET_PESA",
+    "EventCode": "0x2",
+    "BriefDescription": "TODO: string",
+    "PesaSupported": "1"
+  },
+  {
+    "EventName": "CYCLES_NO_PESA",
+    "EventCode": "0x1",
+    "BriefDescription": "TODO: string",
+    "PesaSupported": "0"
+  }
+]
