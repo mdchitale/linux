@@ -359,6 +359,7 @@
 /* TODO: comment */
 #define SHPMSDATA_MODE		GENMASK(6, 5)
 #define SHPMSDATA_V		BIT(7)
+#define SHPMSDATA_METADATA_SHIFT	8
 #define SHPMSDATA_MODE_U	0
 #define SHPMSDATA_MODE_S	1
 
