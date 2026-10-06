@@ -69,6 +69,7 @@ static bool sbi_v2_available;
 static bool sbi_v3_available;
 static bool sspesa_available;
 static bool ssplcofi_available;
+static bool (*pmu_sbi_sspesa_derive_pc)(unsigned long *pc, unsigned long sdata);
 
 static DEFINE_STATIC_KEY_FALSE(sbi_pmu_snapshot_available);
 #define sbi_pmu_snapshot_available() \
@@ -680,14 +681,22 @@ static bool pmu_sbi_is_pesa_event(struct perf_event *event)
 {
 	u64 config = event->attr.config;
 
-	return sspesa_available && event->attr.type == PERF_TYPE_RAW &&
-	       !(config >> 62) && (config & RISCV_PMU_PESA_EVENT);
+	if (!sspesa_available)
+		return false;
+
+	if (event->attr.type != PERF_TYPE_RAW)
+		return false;
+
+	if (config >> 62)
+		return false;
+
+	return config & RISCV_PMU_PESA_EVENT;
 }
 
 /* TODO: comment */
 static int pmu_sbi_precise_max(struct perf_event *event)
 {
-	if (!pmu_sbi_is_pesa_event(event))
+	if (!pmu_sbi_is_pesa_event(event) || !pmu_sbi_sspesa_derive_pc)
 		return 0;
 
 	return ssplcofi_available ? 3 : 2;
@@ -1134,6 +1143,30 @@ static bool pmu_sbi_sspesa_regs(struct pt_regs *sregs, struct pt_regs *regs,
 	return true;
 }
 
+/* QEMU virt machine supports precise attribution and returns true for all samples */
+static bool pmu_sbi_sspesa_pc_exact(unsigned long *pc, unsigned long sdata)
+{
+	return !(sdata >> SHPMSDATA_METADATA_SHIFT);
+}
+
+/*
+ * Following is a tentative guideline in the spec that if shpmsdata is not hardwired to 0 and no
+ * custom algorithm is reported then software shouldn't report support for precise attribution.
+ * The pmu_sbi_sspesa_derive_pc is responsible for implementing the custom algorithm and must be
+ * set per vendor and implementation during probe. If it isn't set then precise attribution is
+ * not supported for that vendor and implementation.
+ */
+static void pmu_sbi_sspesa_setup(void)
+{
+	switch (riscv_cached_mvendorid(0)) {
+	case 0:
+		pmu_sbi_sspesa_derive_pc = pmu_sbi_sspesa_pc_exact;
+		break;
+	default:
+		break;
+	}
+}
+
 static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 {
 	struct perf_sample_data data;
@@ -1151,6 +1184,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 	unsigned long sample_pc = 0;
 	unsigned long sample_data = 0;
 	int sample_cntrid = -1;
+	bool sample_exact = false;
 	u64 raw_sample;
 	struct perf_raw_record raw = { 0 };
 	struct pt_regs sregs, *sample_regs;
@@ -1202,6 +1236,9 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 		sample_pc = csr_read(CSR_SHPMSPC);
 		sample_data = csr_read(CSR_SHPMSDATA);
 		sample_cntrid = sample_data & SHPMSDATA_CNTRID;
+		if (pmu_sbi_sspesa_derive_pc)
+			sample_exact = pmu_sbi_sspesa_derive_pc(&sample_pc,
+								sample_data);
 	}
 
 	for_each_set_bit(lidx, cpu_hw_evt->used_hw_ctrs, RISCV_MAX_COUNTERS) {
@@ -1246,7 +1283,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 				data.sample_flags |= PERF_SAMPLE_IP;
 			} else if (pmu_sbi_sspesa_regs(&sregs, regs, sample_pc,
 						       sample_data)) {
-				if (pmu_sbi_is_pesa_event(event))
+				if (sample_exact && pmu_sbi_is_pesa_event(event))
 					sregs.status |= PERF_SR_EXACT;
 				sample_regs = &sregs;
 			}
@@ -1326,12 +1363,6 @@ static int pmu_sbi_setup_irqs(struct riscv_pmu *pmu, struct platform_device *pde
 	int ret;
 	struct cpu_hw_events __percpu *hw_events = pmu->hw_events;
 	struct irq_domain *domain = NULL;
-
-	if (riscv_isa_extension_available(NULL, SSPESA))
-		sspesa_available = true;
-
-	if (riscv_isa_extension_available(NULL, SSPLCOFI))
-		ssplcofi_available = true;
 
 	if (riscv_isa_extension_available(NULL, SSCOFPMF)) {
 		riscv_pmu_irq_num = RV_IRQ_PMU;
@@ -1600,6 +1631,14 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
 		pmu->pmu.capabilities |= PERF_PMU_CAP_NO_EXCLUDE;
 	}
 	irq_requested = (ret == 0);
+
+	if (riscv_isa_extension_available(NULL, SSPESA)) {
+		sspesa_available = true;
+		pmu_sbi_sspesa_setup();
+	}
+
+	if (riscv_isa_extension_available(NULL, SSPLCOFI))
+		ssplcofi_available = true;
 
 	pmu->pmu.attr_groups = riscv_pmu_attr_groups;
 	pmu->pmu.parent = &pdev->dev;
