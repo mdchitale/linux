@@ -1114,22 +1114,32 @@ static void pmu_sbi_start_overflow_mask(struct riscv_pmu *pmu,
 		pmu_sbi_start_ovf_ctrs_sbi(cpu_hw_evt, ctr_ovf_mask);
 }
 
-/* TODO: comment */
+/* Try to reconstruct the frame for perf */
 static bool pmu_sbi_sspesa_regs(struct pt_regs *sregs, struct pt_regs *regs,
 				unsigned long pc, unsigned long sdata)
 {
 	switch (FIELD_GET(SHPMSDATA_MODE, sdata)) {
 	case SHPMSDATA_MODE_U:
+		/*
+		 * Hardware indicates 'U' mode but it's not a userspace task, so this
+		 * frame cannot be constructed.
+		 */
 		if (!is_user_task(current))
 			return false;
+		/* Clear SPP to indicate 'U' mode */
 		*sregs = *task_pt_regs(current);
 		sregs->status &= ~SR_PP;
 		break;
 	case SHPMSDATA_MODE_S:
+		/* Set SPP to indicate 'S' mode */
 		*sregs = *regs;
 		sregs->status |= SR_PP;
 		if (user_mode(regs)) {
-			/* TODO: comment */
+			/*
+			 * The interrupt was delivered in 'U' mode whereas sample
+			 * was recorded in 'S' mode and we dont have a reliable
+			 * frame for that.
+			 */
 			sregs->s0 = 0;
 			sregs->sp = 0;
 		}
