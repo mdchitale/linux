@@ -15,7 +15,7 @@ unsigned long perf_arch_misc_flags(struct pt_regs *regs)
 	else
 		misc = PERF_RECORD_MISC_KERNEL;
 
-	if (regs->status & PERF_SR_EXACT)
+	if (regs->status & PERF_SR_PRECISE)
 		misc |= PERF_RECORD_MISC_EXACT_IP;
 
 	return misc;

@@ -1111,13 +1111,16 @@ static void pmu_sbi_start_overflow_mask(struct riscv_pmu *pmu,
 		pmu_sbi_start_ovf_ctrs_sbi(cpu_hw_evt, ctr_ovf_mask);
 }
 
-/* Try to construct the regs for perf */
+/*
+ * Construct the regs for perf if skid is from U->U, S->S or S->U. If the skid was from
+ * U->S or if 'V' bit is set fallback to trap regs.
+ */
 static bool pmu_sbi_sspesa_regs(struct pt_regs *perf_regs, struct pt_regs *regs,
 				unsigned long pc, unsigned long sdata)
 {
 	int mode = FIELD_GET(SHPMSDATA_MODE, sdata);
 
-	/* TODO: comment */
+	/* Virtualization not supported yet */
 	if (sdata & SHPMSDATA_V)
 		return false;
 
@@ -1133,7 +1136,6 @@ static bool pmu_sbi_sspesa_regs(struct pt_regs *perf_regs, struct pt_regs *regs,
 		break;
 	case SHPMSDATA_MODE_S:
 		*perf_regs = *regs;
-		/* Set SPP to indicate 'S' mode */
 		perf_regs->status |= SR_PP;
 		if (user_mode(regs)) {
 			/*
@@ -1154,7 +1156,7 @@ static bool pmu_sbi_sspesa_regs(struct pt_regs *perf_regs, struct pt_regs *regs,
 }
 
 /* QEMU virt machine supports precise attribution and returns true for all samples */
-static bool pmu_sbi_sspesa_pc_exact(unsigned long *pc, unsigned long sdata)
+static bool pmu_sbi_sspesa_pc_precise(unsigned long *pc, unsigned long sdata)
 {
 	return !(sdata >> SHPMSDATA_METADATA_SHIFT);
 }
@@ -1170,7 +1172,7 @@ static void pmu_sbi_sspesa_setup(void)
 {
 	switch (riscv_cached_mvendorid(0)) {
 	case 0:
-		pmu_sbi_sspesa_derive_pc = pmu_sbi_sspesa_pc_exact;
+		pmu_sbi_sspesa_derive_pc = pmu_sbi_sspesa_pc_precise;
 		break;
 	default:
 		break;
@@ -1194,7 +1196,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 	unsigned long sample_pc = 0;
 	unsigned long sample_data = 0;
 	int sample_cntrid = -1;
-	bool sample_exact = false;
+	bool sample_precise = false;
 	u64 raw_sample;
 	struct perf_raw_record raw = { 0 };
 	struct pt_regs perf_regs, *sample_regs;
@@ -1247,7 +1249,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 		sample_data = csr_read(CSR_SHPMSDATA);
 		sample_cntrid = sample_data & SHPMSDATA_CNTRID;
 		if (pmu_sbi_sspesa_derive_pc)
-			sample_exact = pmu_sbi_sspesa_derive_pc(&sample_pc,
+			sample_precise = pmu_sbi_sspesa_derive_pc(&sample_pc,
 								sample_data);
 	}
 
@@ -1290,8 +1292,8 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 		if (sspesa_available && (pmu_sbi_csr_index(event)== sample_cntrid)) {
 			if (pmu_sbi_sspesa_regs(&perf_regs, regs, sample_pc, sample_data)) {
 				sample_regs = &perf_regs;
-				if (sample_exact && pmu_sbi_is_pesa_event(event))
-					sample_regs.status |= PERF_SR_EXACT;
+				if (sample_precise && pmu_sbi_is_pesa_event(event))
+					sample_regs->status |= PERF_SR_PRECISE;
 				
 			}
 
