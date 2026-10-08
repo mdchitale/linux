@@ -1111,10 +1111,7 @@ static void pmu_sbi_start_overflow_mask(struct riscv_pmu *pmu,
 		pmu_sbi_start_ovf_ctrs_sbi(cpu_hw_evt, ctr_ovf_mask);
 }
 
-/*
- * Construct the regs for perf if skid is from U->U, S->S or S->U. If the skid was from
- * U->S or if 'V' bit is set fallback to trap regs.
- */
+/* TODO: comment */
 static bool pmu_sbi_sspesa_regs(struct pt_regs *perf_regs, struct pt_regs *regs,
 				unsigned long pc, unsigned long sdata)
 {
@@ -1294,7 +1291,6 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 				sample_regs = &perf_regs;
 				if (sample_precise && pmu_sbi_is_pesa_event(event))
 					sample_regs->status |= PERF_SR_PRECISE;
-				
 			}
 
 			raw_sample = sample_data;
