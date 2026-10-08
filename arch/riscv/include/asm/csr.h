@@ -356,7 +356,6 @@
 
 /* shpmsdata fields */
 #define SHPMSDATA_CNTRID	GENMASK(4, 0)
-/* TODO: comment */
 #define SHPMSDATA_MODE		GENMASK(6, 5)
 #define SHPMSDATA_V		BIT(7)
 #define SHPMSDATA_METADATA_SHIFT	8
