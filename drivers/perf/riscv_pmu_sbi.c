@@ -676,24 +676,21 @@ static bool pmu_sbi_is_fw_event(struct perf_event *event)
 		return false;
 }
 
-/* TODO: comment */
+/*
+ * Check if this event can claim precise attribution on this platform. Only hardware raw
+ * events can claim precise attribution support.
+ */
 static bool pmu_sbi_is_pesa_event(struct perf_event *event)
 {
 	u64 config = event->attr.config;
 
-	if (!sspesa_available)
-		return false;
-
-	if (event->attr.type != PERF_TYPE_RAW)
-		return false;
-
-	if (config >> 62)
+	if (!sspesa_available || (event->attr.type != PERF_TYPE_RAW) || (config >> 62))
 		return false;
 
 	return config & RISCV_PMU_PESA_EVENT;
 }
 
-/* TODO: comment */
+/* Check if this event can fulfill the precise_ip level requested by the user */
 static int pmu_sbi_precise_max(struct perf_event *event)
 {
 	if (!pmu_sbi_is_pesa_event(event) || !pmu_sbi_sspesa_derive_pc)
@@ -1120,6 +1117,10 @@ static bool pmu_sbi_sspesa_regs(struct pt_regs *perf_regs, struct pt_regs *regs,
 {
 	int mode = FIELD_GET(SHPMSDATA_MODE, sdata);
 
+	/* TODO: comment */
+	if (sdata & SHPMSDATA_V)
+		return false;
+
 	switch (mode) {
 	case SHPMSDATA_MODE_U:
 		/*
@@ -1196,7 +1197,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 	bool sample_exact = false;
 	u64 raw_sample;
 	struct perf_raw_record raw = { 0 };
-	struct pt_regs sregs, *sample_regs;
+	struct pt_regs perf_regs, *sample_regs;
 
 	if (WARN_ON_ONCE(!cpu_hw_evt))
 		return IRQ_NONE;
@@ -1285,16 +1286,13 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 		hw_evt->state |= PERF_HES_UPTODATE;
 		perf_sample_data_init(&data, 0, hw_evt->last_period);
 		sample_regs = regs;
-		if (sspesa_available && info->csr - CSR_CYCLE == sample_cntrid) {
-			if (sample_data & SHPMSDATA_V) {
-				/* TODO: comment */
-				data.ip = sample_pc;
-				data.sample_flags |= PERF_SAMPLE_IP;
-			} else if (pmu_sbi_sspesa_regs(&sregs, regs, sample_pc,
-						       sample_data)) {
+		/* Update the regs if the current event caused the overflow */
+		if (sspesa_available && (pmu_sbi_csr_index(event)== sample_cntrid)) {
+			if (pmu_sbi_sspesa_regs(&perf_regs, regs, sample_pc, sample_data)) {
+				sample_regs = &perf_regs;
 				if (sample_exact && pmu_sbi_is_pesa_event(event))
-					sregs.status |= PERF_SR_EXACT;
-				sample_regs = &sregs;
+					sample_regs.status |= PERF_SR_EXACT;
+				
 			}
 
 			raw_sample = sample_data;
